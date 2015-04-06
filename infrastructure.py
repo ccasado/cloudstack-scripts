@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # TODO
-# list networks by account
-# list project associated to VR's/network
+# list network by account
 
 import argparse
 import os
@@ -17,12 +16,8 @@ parser.add_argument('--vr', action="store_true", help='State and version of Virt
 parser.add_argument('--ssvm', action="store_true", help='State of system vms')
 parser.add_argument('--lb', type=str, help="List LoadBalancer by project or account")
 parser.add_argument('--userdata', action="store_true", help='Show userdata length for each VM')
-parser.add_argument('--reset_userdata', type=str, help='Reset userdata by project id or vm id')
 parser.add_argument('--capacity', action="store_true", help='Capacity by zone and type, ordered by used resources')
 parser.add_argument('--region', type=str, default='lab', help='Choose your region based on your cloudmonkey profile. Default profile is "lab"')
-parser.add_argument('--vm', action="store_true", help='List VMs by host')
-
-
 args = parser.parse_args()
 
 
@@ -31,17 +26,22 @@ parser = SafeConfigParser()
 parser.read(os.path.expanduser('~/.cloudmonkey/config'))
 if parser.has_section(args.region):
     if not parser.has_option(args.region, 'url'):
-        sys.exit("There is no url option in '%s' section" % args.region)
+        print "There is no url option in '%s' section" % args.region
+        sys.exit(1)
     if not parser.has_option(args.region, 'apikey'):
-        sys.exit("There is no 'apikey' option in '%s' section" % args.region)
+        print "There is no 'apikey' option in '%s' section" % args.region
+        sys.exit(1)
     if not parser.has_option(args.region, 'secretkey'):
-        sys.exit("There is no 'secretkey' option in '%s' section" % args.region)
+        print "There is no 'secretkey' option in '%s' section" % args.region
+        sys.exit(1)
 
     apikey = parser.get(args.region, 'apikey')
     api_url = parser.get(args.region, 'url')
     secretkey = parser.get(args.region, 'secretkey')
 else:
-    sys.exit("Invalid region: '%s'" % args.region)
+    print "Invalid region: '%s'" % args.region
+    sys.exit(1)
+
 api = CloudStack(api_url, apikey, secretkey)
 
 capacity_type = {
@@ -81,21 +81,14 @@ def get_projects(param):
         'listall':  'true',
         'state':    'Active'
     })
-    if 'project' in result:
-        p_ids = []
-        for p_id in result['project']:
-            p_ids.append(p_id[param])
-        return p_ids
-    else:
-        sys.exit("There is no projects on this region!")
+    p_ids = []
+    for p_id in result['project']:
+        p_ids.append(p_id[param])
+    return p_ids
 
 
 def get_project_detail(**kwargs):
-        return api.listProjects(kwargs)
-
-
-def get_vm_detail(**kwargs):
-    return api.listVirtualMachine(kwargs)
+    return api.listProjects(kwargs)
 
 
 def get_network_detail(**kwargs):
@@ -110,14 +103,8 @@ def get_userdata(vmid):
     })
     return result
 
-
-def reset_userdata_by_vm_id(vm_id):
-    result = api.updateVirtualMachine({
-        'userdata':     'ZWNobwo=',
-        'id':           vm_id
-    })
-    return result
-
+def percentage(part, whole):
+  return 100 * int(part)/int(whole)
 
 def list_projects():
     result = api.listProjects({
@@ -129,13 +116,13 @@ def list_projects():
     t.align['Project'] = 'l'
     for res in result['project']:
         t.add_row([res['name'], res['account'],
-                  "%s/%s" % (res['cputotal'], res['cpulimit']),
-                  "%s/%s" % (int(res['memorytotal'])/1024, int(res['memorylimit'])/1024),
-                  "%s/%s" % (res['primarystoragetotal'], res['primarystoragelimit']),
-                  "%s/%s" % (res['secondarystoragetotal'], res['secondarystoragelimit']),
-                  "%s/%s" % (res['templatetotal'], res['templatelimit']),
-                  "%s/%s" % (res['vmtotal'], res['vmlimit']),
-                  "%s/%s" % (res['volumetotal'], res['volumelimit'])])
+                  "%s/%s (%s" % (res['cputotal'], res['cpulimit'], percentage((res['cputotal']), (res['cpulimit']))) + "%)",
+                  "%s/%s (%s" % (int(res['memorytotal'])/1024, int(res['memorylimit'])/1024, percentage(int(res['memorytotal'])/1024, int(res['memorylimit'])/1024)) + "%)",
+                  "%s/%s (%s" % (res['primarystoragetotal'], res['primarystoragelimit'], percentage((res['primarystoragetotal']), (res['primarystoragelimit']))) + "%)",
+                  "%s/%s (%s" % (res['secondarystoragetotal'], res['secondarystoragelimit'], percentage((res['secondarystoragetotal']), (res['secondarystoragelimit']))) + "%)",
+                  "%s/%s (%s" % (res['templatetotal'], res['templatelimit'], percentage((res['templatetotal']), (res['templatelimit']))) + "%)",
+                  "%s/%s (%s" % (res['vmtotal'], res['vmlimit'], percentage((res['vmtotal']), (res['vmlimit']))) + "%)",
+                  "%s/%s (%s" % (res['volumetotal'], res['volumelimit'], percentage((res['volumetotal']), (res['volumelimit']))) + "%)"])
     return t.get_string(sortby="Project")
 
 
@@ -179,34 +166,24 @@ def list_clusters():
 
 
 def list_vrs():
-    # show project
     result = api.listRouters({
         'listall':  'true',
     })
     t = PrettyTable(['Name', 'State', 'Zone', 'Host', 'Version', 'Network Domain', 'Networkname', 'Link Local IP',
                     'Guest IP Addr'])
-    if 'router' in result:
-        for rtr in result['router']:
-            if 'hostname' not in rtr:
-                rtr['hostname'] = 'N/A'
-            if 'linklocalip' not in rtr:
-                rtr['linklocalip'] = 'N/A'
-            if 'networkdomain' not in rtr:
-                rtr['networkdomain'] = 'N/A'
-            for device in rtr['nic']:
-                if 'networkname' in device:
-                    ntw_name = device['networkname']
-                if 'ip6address' in device:
-                    ip_addr = device['ip6address']
-                if 'ipaddress' in device:
-                    if not device['ipaddress'].startswith('169'):
-                        ip_addr = device['ipaddress']
+    for rtr in result['router']:
+        for device in rtr['nic']:
+            if 'networkname' in device:
+                ntw_name = device['networkname']
+            if 'ip6address' in device:
+                ip_addr = device['ip6address']
+            elif device.get('ipaddress'):
+                if not device['ipaddress'].startswith('169'):
+                    ip_addr = device['ipaddress']
 
-            t.add_row([rtr['name'], rtr['state'], rtr['zonename'], rtr['hostname'], rtr['version'],
-                      rtr['networkdomain'], ntw_name, rtr['linklocalip'], ip_addr])
-        return t.get_string(sortby="Version", reversesort=True)
-    else:
-        sys.exit("There is no VR's in this region")
+        t.add_row([rtr.get('name'), rtr.get('state'), rtr.get('zonename'), rtr.get('hostname'), rtr.get('version'), rtr.get('networkdomain'),
+                  ntw_name, rtr.get('linklocalip'), ip_addr])
+    return t.get_string(sortby="Version", reversesort=True)
 
 
 def list_ssvms():
@@ -244,7 +221,8 @@ def list_loadbalancers():
         param_type = 'account'
         lst_type = 'account'
     else:
-        sys.exit("Invalid lb option\n Use: --lb project or --lb account")
+        print "Invalid lb option\n Use: --lb project or --lb account"
+        sys.exit(1)
 
     t = PrettyTable([lst_type.capitalize(), 'State', 'Name', 'PublicIP', 'CIDR', 'Network Name', 'Network Domain',
                     'Additional Networks'])
@@ -269,28 +247,10 @@ def list_loadbalancers():
     return t.get_string(sortby=lst_type.capitalize())
 
 
-def list_vms():
-    t = PrettyTable(['Project', 'Hostname', 'displayname', 'instancename'])
-    for project in get_projects('id'):
-        project_name = get_project_detail(id=project, listall='true')['project'][0]['name']
-        print "Getting VM list from project '%s'" % project_name
-        result = api.listVirtualMachines({
-            'listall':      'true',
-            'projectid':    project
-        })
-        if 'virtualmachine' in result:
-            for vm in result['virtualmachine']:
-                if 'hostname' in vm:
-                    t.add_row([project_name, vm['hostname'], vm['displayname'], vm['instancename']])
-    return t.get_string(sortby="Hostname")
-
-
 def list_userdata():
-    # list by project
     t = PrettyTable(['Project', 'Vm Name', 'VM ID', 'Length'])
     for project in get_projects('id'):
         project_name = get_project_detail(id=project, listall='true')['project'][0]['name']
-        print "Getting userdata from project '%s' (id:%s)" % (project_name, project)
         result = api.listVirtualMachines({
             'listall':      'true',
             'projectid':    project
@@ -302,32 +262,12 @@ def list_userdata():
                     t.add_row([project_name, vm['name'], vm['id'], len(userdata['userdata'])])
     return t.get_string(sortby="Length", reversesort=True)
 
-
-def reset_userdata(project_id):
-        if 'project' in get_project_detail(id=project_id, listall='true'):
-            project_name = get_project_detail(id=project_id, listall='true')['project'][0]['name']
-        else:
-            sys.exit("There is no project with id: '%s'" % project_id)
-
-        shall = raw_input("Remove userdata from _all_ VM's on project '%s' (y/N) " % project_name).lower() == 'y'
-        if shall:
-            result = api.listVirtualMachines({
-                'listall':      'true',
-                'projectid':    project_id
-            })
-            if result:
-                for vm in result['virtualmachine']:
-                    userdata = get_userdata(vmid=vm['id'])['virtualmachineuserdata']
-                    if 'userdata' in userdata:
-                        print "Reseting userdata from vm: %s" % (vm['name'])
-                        reset_userdata_by_vm_id(vm['id'])
-
-
 if args.project:
     print list_projects()
 elif args.cluster:
     print list_clusters()
 elif args.vr:
+    print "List VR's in 'Running' state!"
     print list_vrs()
 elif args.ssvm:
     print list_ssvms()
@@ -337,10 +277,3 @@ elif args.lb:
     print list_loadbalancers()
 elif args.userdata:
     print list_userdata()
-elif args.vm:
-    print list_vms()
-elif args.reset_userdata:
-    if len(args.reset_userdata.split("-")) != 5:
-        print len(args.reset_userdata.split("-"))
-        sys.exit("The id provided does not look like an uuid")
-    reset_userdata(args.reset_userdata)
